@@ -120,8 +120,6 @@ services:
     depends_on:
       - runner
       - mcp-google-workspace
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
@@ -145,8 +143,6 @@ services:
       - SPRINT_RUNNER_PORT=8002
       - CLAUDE_CODE_MAX_OUTPUT_TOKENS=128000
       - *config-path
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8002/health')"]
