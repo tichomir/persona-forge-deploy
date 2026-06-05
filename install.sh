@@ -25,9 +25,21 @@ die()  { printf '\033[1;31m✗ %s\033[0m\n' "$1" >&2; exit 1; }
 # 1. Container engine — Podman preferred (daemonless, rootless, no Desktop license)
 if command -v podman >/dev/null 2>&1; then
     ENGINE=podman
-    if podman compose version >/dev/null 2>&1; then COMPOSE="podman compose"
-    elif command -v podman-compose >/dev/null 2>&1; then COMPOSE="podman-compose"
-    else die "Podman found but no compose provider. Install podman-compose (pip install podman-compose) or Podman 4.1+ with a compose provider."
+    # Point docker-compatible compose providers at Podman's own socket, so a
+    # docker-compose provider doesn't try (and fail) to reach a Docker daemon
+    # — the classic "Cannot connect to the Docker daemon" error on Podman boxes.
+    _sock=$(podman info --format '{{.Host.RemoteSocket.Path}}' 2>/dev/null || true)
+    if [ -n "$_sock" ]; then
+        case "$_sock" in
+            unix://*|npipe://*) export DOCKER_HOST="$_sock" ;;
+            *) export DOCKER_HOST="unix://$_sock" ;;
+        esac
+    fi
+    # Prefer podman-compose (talks to Podman directly); the `podman compose`
+    # wrapper's provider varies by machine and may pick docker-compose.
+    if command -v podman-compose >/dev/null 2>&1; then COMPOSE="podman-compose"
+    elif podman compose version >/dev/null 2>&1; then COMPOSE="podman compose"
+    else die "Podman found but no compose provider. Install it:  pip3 install podman-compose"
     fi
 elif command -v docker >/dev/null 2>&1; then
     ENGINE=docker
