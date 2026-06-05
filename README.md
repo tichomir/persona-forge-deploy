@@ -6,8 +6,16 @@ and the container images are private.
 
 ## Prerequisites
 
-1. **Podman** (recommended — daemonless, rootless, no Docker Desktop license) or **Docker**.
-   - macOS: `brew install podman && podman machine init && podman machine start`
+1. **A container engine + Compose.** Podman is recommended (daemonless, rootless,
+   no Docker Desktop license). You need **`podman-compose`** alongside `podman`
+   (or Docker with Compose).
+   - **macOS:**
+     ```bash
+     brew install podman podman-compose
+     podman machine init && podman machine start
+     ```
+   - **Linux:** install `podman` + `podman-compose` from your distro (or `pip3 install podman-compose`).
+   - Docker alternative: install Docker Desktop (it includes Compose) and start it.
 2. **Access** — ask the maintainer to add you as a **collaborator** (this grants you image-pull access).
 3. **A GitHub token** with the **`read:packages`** scope:
    GitHub → Settings → Developer settings → Personal access tokens → **Tokens (classic)** → check `read:packages`.
@@ -50,3 +58,7 @@ personaforge status     # container status
 - **Pin a version:** `PF_VERSION=v0.1.0 personaforge update`.
 - **Trouble pulling images?** Your token needs `read:packages` and your account
   must be a collaborator. Re-run after `podman login ghcr.io` / `docker login ghcr.io`.
+- **"Cannot connect to the Docker daemon" on a Podman box?** Make sure
+  `podman-compose` is installed and the Podman machine is running
+  (`podman machine start`). The installer points Compose at Podman's socket
+  automatically, but it still needs a compose provider present.
