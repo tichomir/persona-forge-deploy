@@ -154,7 +154,9 @@ services:
   mcp-google-workspace:
     image: ${PF_REGISTRY:-ghcr.io/tichomir}/persona-forge-mcp-google-workspace:${PF_VERSION:-latest}
     ports:
-      - "127.0.0.1:8000:8000"                        # one-time Google OAuth callback
+      # one-time Google OAuth callback. Host port overridable (PF_MCP_OAUTH_PORT)
+      # so a throwaway/second stack can avoid clashing with a running instance.
+      - "127.0.0.1:${PF_MCP_OAUTH_PORT:-8000}:8000"
     volumes:
       - pf_config:/data/config
       - pf_mcp_tokens:/root/.google_workspace_mcp
@@ -242,7 +244,32 @@ exec env PERSONAFORGE_HOME="$HOME_DIR" PF_REGISTRY="$REGISTRY" PF_VERSION="$VERS
 PF_CLI_EOF
 chmod +x "$BIN_DIR/personaforge" 2>/dev/null || true
 
+# Make sure ~/.local/bin is on PATH so `personaforge` works without a full path.
+# If it isn't, add it to the user's shell rc (idempotent) so new shells pick it
+# up, and below we tell them how to activate it in the current shell too.
+PF_RC=""
+case ":$PATH:" in
+  *":$BIN_DIR:"*) ;;  # already on PATH — nothing to do
+  *)
+    case "${SHELL:-}" in
+      *zsh)  PF_RC="$HOME/.zshrc" ;;
+      *bash) PF_RC="$HOME/.bashrc" ;;
+      *)     PF_RC="$HOME/.profile" ;;
+    esac
+    PF_PATH_LINE='export PATH="$HOME/.local/bin:$PATH"'
+    if ! grep -qsF "$PF_PATH_LINE" "$PF_RC" 2>/dev/null; then
+      printf '\n# Added by the PersonaForge installer\n%s\n' "$PF_PATH_LINE" >> "$PF_RC" 2>/dev/null || true
+    fi
+    ;;
+esac
+
 say "PersonaForge is starting at http://localhost:$PORT"
 say "Open it and paste your Anthropic API key in the wizard."
+say "Manage it anytime with:  personaforge start | stop | update | logs | status"
+if [ -n "$PF_RC" ]; then
+  say "Note: ~/.local/bin wasn't on your PATH — added it to $PF_RC."
+  say "  Open a NEW terminal, or run now:  export PATH=\"\$HOME/.local/bin:\$PATH\""
+  say "  Until then, use the full path:    $BIN_DIR/personaforge status"
+fi
 ( command -v open >/dev/null 2>&1 && open "http://localhost:$PORT" ) \
     || ( command -v xdg-open >/dev/null 2>&1 && xdg-open "http://localhost:$PORT" ) || true
