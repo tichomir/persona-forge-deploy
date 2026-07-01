@@ -130,7 +130,9 @@ services:
   mcp-google-workspace:
     image: ${PF_REGISTRY:-ghcr.io/tichomir}/persona-forge-mcp-google-workspace:${PF_VERSION:-latest}
     ports:
-      - "127.0.0.1:8000:8000"                        # one-time Google OAuth callback
+      # one-time Google OAuth callback. Host port overridable (PF_MCP_OAUTH_PORT)
+      # so a throwaway/second stack can avoid clashing with a running instance.
+      - "127.0.0.1:${PF_MCP_OAUTH_PORT:-8000}:8000"
     volumes:
       - pf_config:/data/config
       - pf_mcp_tokens:/root/.google_workspace_mcp
