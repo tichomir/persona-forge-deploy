@@ -86,6 +86,9 @@ x-config-env: &config-path PERSONAFORGE_CONFIG_PATH=/data/config/personaforge.co
 services:
 
   api:
+    # Fast restarts: uvicorn's graceful shutdown blocks on the Telegram
+    # long-poll (25 s in flight) — waiting is pointless, kill quickly.
+    stop_grace_period: 3s
     image: ${PF_REGISTRY:-ghcr.io/tichomir}/persona-forge-api:${PF_VERSION:-latest}
     volumes:
       - pf_config:/data/config                       # personaforge.config.json (shared)
