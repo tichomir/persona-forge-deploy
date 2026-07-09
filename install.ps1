@@ -144,6 +144,8 @@ services:
     environment:
       - OPENSSL_armcap=0   # Apple-M4 fix: see Dockerfile.api note
       - HOST=0.0.0.0
+      - WORKSPACE_MCP_HOST=0.0.0.0   # workspace-mcp >= 1.16 ignores HOST; see Dockerfile.mcp-workspace
+      - FASTMCP_HTTP_ALLOWED_HOSTS=["mcp-google-workspace:8000","mcp-google-workspace"]
       - PORT=8000
       - *config-path
     restart: unless-stopped
