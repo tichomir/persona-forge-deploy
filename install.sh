@@ -112,6 +112,7 @@ services:
       - pf_templates:/app/templates                  # shared with runner
       - pf_persona_git:/app/.persona-data.git
     environment:
+      - OPENSSL_armcap=0   # Apple-M4 fix: see Dockerfile.api note
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
       - SPRINT_RUNNER_URL=${SPRINT_RUNNER_URL:-http://runner:8002}
@@ -142,6 +143,7 @@ services:
       - pf_pipeline_runs:/app/data/pipelines/runs:ro
       - pf_figma_cache:/figma-cache:ro
     environment:
+      - OPENSSL_armcap=0   # Apple-M4 fix: see Dockerfile.api note
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
       - SPRINT_RUNNER_PORT=8002
       - CLAUDE_CODE_MAX_OUTPUT_TOKENS=128000
@@ -164,6 +166,7 @@ services:
       - pf_config:/data/config
       - pf_mcp_tokens:/root/.google_workspace_mcp
     environment:
+      - OPENSSL_armcap=0   # Apple-M4 fix: see Dockerfile.api note
       - HOST=0.0.0.0
       - PORT=8000
       - *config-path
@@ -181,6 +184,7 @@ services:
       - pf_config:/data/config:ro
       - pf_figma_cache:/figma-cache
     environment:
+      - OPENSSL_armcap=0   # Apple-M4 fix: see Dockerfile.api note
       - PORT=8005
       - FRAMELINK_HOST=0.0.0.0
       - IMAGE_DIR=/figma-cache
