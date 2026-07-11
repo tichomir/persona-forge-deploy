@@ -117,6 +117,10 @@ services:
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
       - SPRINT_RUNNER_URL=${SPRINT_RUNNER_URL:-http://runner:8002}
       - MCP_WORKSPACE_URL=${MCP_WORKSPACE_URL:-http://mcp-google-workspace:8000/mcp}
+      # Operator MCP (mcp_server.py in the runner) phones home over the
+      # container network — host.docker.internal needs a host-gateway mapping
+      # that only the dev compose has.
+      - PERSONAFORGE_SELF_URL=${PERSONAFORGE_SELF_URL:-http://api:8000}
       - PERSONAFORGE_PERSONAS_DIR=/data/personas
       - PERSONAFORGE_SKILL_DATA_DIR=/data/skill_library
       - PERSONAFORGE_BUILDER_MEMORY_DIR=/data/builder-memory
