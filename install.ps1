@@ -218,5 +218,7 @@ Say "Starting PersonaForge…"
 Invoke-Expression "$Compose -f docker-compose.release.yml up -d"
 Pop-Location
 
-Say "PersonaForge is starting at http://localhost:$Port — paste your Anthropic key in the wizard."
+Say "PersonaForge is starting at http://localhost:$Port — connect Claude in Settings -> Anthropic:"
+Say "  - Claude Code seat (no API key): run 'claude setup-token' where you're signed in, paste it under Claude access"
+Say "  - or paste an Anthropic API key"
 Start-Process "http://localhost:$Port"
