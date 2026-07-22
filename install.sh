@@ -6,7 +6,7 @@
 # One command. No compose file to download, no data folder to create — the
 # compose is embedded below and all storage is Docker/Podman-managed named
 # volumes. The only input is GHCR_TOKEN (a GitHub token with read:packages,
-# from an account that's a collaborator on the repo). Your Anthropic key goes
+# from an account that's a collaborator on the repo). Claude access (seat token or API key) goes
 # in the first-run wizard in the browser, never on the command line.
 #
 # AUTO-GENERATED from docker-compose.release.yml by scripts/gen_installer.py —
@@ -277,7 +277,9 @@ case ":$PATH:" in
 esac
 
 say "PersonaForge is starting at http://localhost:$PORT"
-say "Open it and paste your Anthropic API key in the wizard."
+say "Connect Claude in Settings -> Anthropic (either works):"
+say "  - Claude Code seat (no API key): run 'claude setup-token' where you're signed in, paste it under Claude access"
+say "  - or paste an Anthropic API key"
 say "Manage it anytime with:  personaforge start | stop | update | logs | status"
 if [ -n "$PF_RC" ]; then
   say "Note: ~/.local/bin wasn't on your PATH — added it to $PF_RC."
