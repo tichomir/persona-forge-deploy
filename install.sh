@@ -111,6 +111,13 @@ services:
       - pf_valuepacks:/app/value_packs/manifests
       - pf_templates:/app/templates                  # shared with runner
       - pf_persona_git:/app/.persona-data.git
+      # v0.8.1 — durable stores that previously lived in the container FS:
+      # autopilot proposals/budget MUST survive container recreation; the
+      # channels links (Telegram reply routing) and the notification bell
+      # ride along for the same reason.
+      - pf_autopilot:/app/autopilot/store
+      - pf_channels:/app/channels/store
+      - pf_notifications:/app/notifications/store
     environment:
       - OPENSSL_armcap=0   # Apple-M4 fix: see Dockerfile.api note
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
@@ -231,6 +238,9 @@ volumes:
   pf_projects:
   pf_figma_cache:
   pf_mcp_tokens:
+  pf_autopilot:
+  pf_channels:
+  pf_notifications:
 COMPOSE_EOF
 
 # 4. Pull + start
