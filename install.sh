@@ -253,18 +253,99 @@ PF_REGISTRY="$REGISTRY" PF_VERSION="$VERSION" PORT="$PORT" $COMPOSE -f docker-co
 # 5. Install the `personaforge` lifecycle command (best-effort)
 BIN_DIR="$HOME/.local/bin"
 mkdir -p "$BIN_DIR"
-cat > "$BIN_DIR/personaforge" <<PF_CLI_EOF
+# The CLI is embedded verbatim from install/personaforge — one source of
+# truth, so a command added there actually reaches installed machines.
+cat > "$BIN_DIR/personaforge.tmp" <<'PF_CLI_EOF'
 #!/bin/sh
-exec env PERSONAFORGE_HOME="$HOME_DIR" PF_REGISTRY="$REGISTRY" PF_VERSION="$VERSION" PORT="$PORT" \\
-    sh -c 'cd "\$PERSONAFORGE_HOME" && case "\${1:-help}" in
-      start|up) $COMPOSE -f docker-compose.release.yml up -d ;;
-      stop|down) $COMPOSE -f docker-compose.release.yml down ;;
-      update) $COMPOSE -f docker-compose.release.yml pull && $COMPOSE -f docker-compose.release.yml up -d ;;
-      logs) shift; $COMPOSE -f docker-compose.release.yml logs -f "\$@" ;;
-      status|ps) $COMPOSE -f docker-compose.release.yml ps ;;
-      *) echo "personaforge: start|stop|update|logs|status" ;;
-    esac' personaforge "\$@"
+# ── personaforge — lifecycle wrapper for a release install ───────────────────
+# Thin convenience around `compose -f docker-compose.release.yml` in the
+# install dir (~/.personaforge).
+#
+# This file is the SINGLE SOURCE OF TRUTH for the CLI: the installer embeds it
+# verbatim (scripts/gen_installer.py, marker __EMBEDDED_CLI__). It used to be
+# duplicated as a cut-down heredoc inside install.sh, so commands added here
+# never reached anyone's machine — `restart` sat unshipped for months.
+set -eu
+
+# The installer rewrites the placeholder with the real install dir; running
+# this script straight from a clone falls back to the default location.
+# NB: the guard below must NOT spell the placeholder in full, or the
+# installer's substitution rewrites the detector too and the fallback fires
+# on every install (caught by test_installed_cli_uses_the_install_dir).
+PF_HOME_DEFAULT="__PF_HOME_DEFAULT__"
+case "$PF_HOME_DEFAULT" in *PF_HOME_DEFAULT*) PF_HOME_DEFAULT="$HOME/.personaforge" ;; esac
+HOME_DIR="${PERSONAFORGE_HOME:-$PF_HOME_DEFAULT}"
+
+COMPOSE_FILE="docker-compose.release.yml"
+PORT="${PORT:-3000}"
+# How much history `logs` shows before following. `logs -f` alone replays
+# everything since container start, which on a long-running install is a wall
+# of text before the line you actually wanted.
+TAIL="${PERSONAFORGE_LOG_TAIL:-100}"
+
+if command -v docker >/dev/null 2>&1; then
+    docker compose version >/dev/null 2>&1 && COMPOSE="docker compose" || COMPOSE="docker-compose"
+elif command -v podman >/dev/null 2>&1; then
+    COMPOSE="podman-compose"
+else
+    echo "No container runtime found (docker/podman)." >&2; exit 1
+fi
+
+[ -f "$HOME_DIR/$COMPOSE_FILE" ] || { echo "Not installed: $HOME_DIR/$COMPOSE_FILE missing. Run the installer first." >&2; exit 1; }
+
+run() { ( cd "$HOME_DIR" && $COMPOSE -f "$COMPOSE_FILE" "$@" ); }
+
+case "${1:-}" in
+    start|up)     run up -d ;;
+    stop|down)    run down ;;
+    # Bounce the containers in place — seconds, and keeps them. If the stack
+    # isn't up (nothing to restart), fall back to bringing it up.
+    restart)      shift; run restart "$@" || run up -d ;;
+    # Full teardown + recreate. Needed when the compose file itself changed
+    # (new services, new volume mounts) — a plain restart won't pick those up.
+    recreate)     run down && run up -d ;;
+    update)       run pull && run up -d ;;
+    logs)
+        shift
+        n="$TAIL"
+        # `personaforge logs -n 500 api` / `--tail 500` / `--tail=all`
+        case "${1:-}" in
+            -n|--tail) n="${2:-$TAIL}"; shift 2 ;;
+            --tail=*)  n="${1#--tail=}"; shift ;;
+        esac
+        run logs -f --tail "$n" "$@" ;;
+    status|ps)    run ps ;;
+    open)         ( open "http://localhost:$PORT" 2>/dev/null || xdg-open "http://localhost:$PORT" 2>/dev/null || echo "http://localhost:$PORT" ) ;;
+    uninstall)
+        printf "Stop containers and remove %s? Your data/ is kept. [y/N] " "$HOME_DIR"
+        read -r ans
+        case "$ans" in
+            y|Y) run down; rm -f "$HOME_DIR/$COMPOSE_FILE"; echo "Removed. Data preserved in $HOME_DIR/data." ;;
+            *)   echo "Cancelled." ;;
+        esac ;;
+    ""|help|-h|--help)
+        cat <<EOF
+personaforge — manage your PersonaForge install
+
+  personaforge start          Start the stack (detached)
+  personaforge stop           Stop the stack
+  personaforge restart [svc]  Bounce the stack (or one service) in place
+  personaforge recreate       Tear down and recreate (after a compose change)
+  personaforge update         Pull latest images and restart
+  personaforge logs [svc]     Follow logs, last $TAIL lines first
+                              (-n 500 / --tail=all for more history)
+  personaforge status         Show container status
+  personaforge open           Open the GUI in your browser
+  personaforge uninstall      Stop + remove the compose file (keeps data/)
+
+Install dir: $HOME_DIR   (override with PERSONAFORGE_HOME)
+EOF
+        ;;
+    *) echo "Unknown command: $1 (try 'personaforge help')" >&2; exit 1 ;;
+esac
 PF_CLI_EOF
+sed "s|__PF_HOME_DEFAULT__|$HOME_DIR|g" "$BIN_DIR/personaforge.tmp" > "$BIN_DIR/personaforge"
+rm -f "$BIN_DIR/personaforge.tmp"
 chmod +x "$BIN_DIR/personaforge" 2>/dev/null || true
 
 # Make sure ~/.local/bin is on PATH so `personaforge` works without a full path.
@@ -290,7 +371,7 @@ say "PersonaForge is starting at http://localhost:$PORT"
 say "Connect Claude in Settings -> Anthropic (either works):"
 say "  - Claude Code seat (no API key): run 'claude setup-token' where you're signed in, paste it under Claude access"
 say "  - or paste an Anthropic API key"
-say "Manage it anytime with:  personaforge start | stop | update | logs | status"
+say "Manage it anytime with:  personaforge start | stop | restart | update | logs | status"
 if [ -n "$PF_RC" ]; then
   say "Note: ~/.local/bin wasn't on your PATH — added it to $PF_RC."
   say "  Open a NEW terminal, or run now:  export PATH=\"\$HOME/.local/bin:\$PATH\""
