@@ -278,6 +278,9 @@ HOME_DIR="${PERSONAFORGE_HOME:-$PF_HOME_DEFAULT}"
 
 COMPOSE_FILE="docker-compose.release.yml"
 PORT="${PORT:-3000}"
+# Where `update` refreshes the compose file and this script from. Overridable
+# for forks/testing; unset it (PF_SELF_UPDATE=0) to keep the current files.
+PF_DEPLOY_RAW="${PF_DEPLOY_RAW:-https://raw.githubusercontent.com/tichomir/persona-forge-deploy/main}"
 # How much history `logs` shows before following. `logs -f` alone replays
 # everything since container start, which on a long-running install is a wall
 # of text before the line you actually wanted.
@@ -304,7 +307,61 @@ case "${1:-}" in
     # Full teardown + recreate. Needed when the compose file itself changed
     # (new services, new volume mounts) — a plain restart won't pick those up.
     recreate)     run down && run up -d ;;
-    update)       run pull && run up -d ;;
+    update)
+        # `update` used to be just `pull && up -d` — new IMAGES against the
+        # compose the installer wrote, possibly months ago. So a release that
+        # added a named volume never applied, and the data that volume existed
+        # to protect was thrown away on every upgrade: orchestrator settings
+        # and standing instructions reset to defaults, every time. Refresh the
+        # topology (and this script) first, then upgrade.
+        if [ "${PF_SELF_UPDATE:-1}" != "0" ]; then
+            fetch() {  # $1 = remote name, $2 = destination
+                if command -v curl >/dev/null 2>&1; then
+                    curl -fsSL "$PF_DEPLOY_RAW/$1" -o "$2" 2>/dev/null
+                elif command -v wget >/dev/null 2>&1; then
+                    wget -qO "$2" "$PF_DEPLOY_RAW/$1" 2>/dev/null
+                else
+                    return 1
+                fi
+            }
+            tmp="$(mktemp)" || tmp=""
+            if [ -n "$tmp" ] && fetch "$COMPOSE_FILE" "$tmp" && [ -s "$tmp" ]; then
+                if ! cmp -s "$tmp" "$HOME_DIR/$COMPOSE_FILE"; then
+                    backup="$HOME_DIR/$COMPOSE_FILE.bak-$(date +%Y%m%d%H%M%S)"
+                    cp "$HOME_DIR/$COMPOSE_FILE" "$backup" 2>/dev/null || true
+                    cp "$tmp" "$HOME_DIR/$COMPOSE_FILE"
+                    echo "▸ Updated the compose file (previous saved as $(basename "$backup"))."
+                fi
+            else
+                echo "▸ Could not fetch the latest compose file — continuing with the current one." >&2
+            fi
+            [ -n "$tmp" ] && rm -f "$tmp"
+
+            # Refresh this script too, so new commands arrive with an update
+            # instead of requiring the installer to be re-run. Written via a
+            # temp file + mv: replacing a running sh script in place is not
+            # safe, but a rename leaves this process on its old inode.
+            self="$0"
+            tmp2="$(mktemp)" || tmp2=""
+            if [ -n "$tmp2" ] && fetch personaforge "$tmp2" && [ -s "$tmp2" ]; then
+                # Assemble the placeholder at runtime. Spelled literally, the
+                # INSTALLER's own global substitution rewrites this line too —
+                # the sed then reads s|/your/dir|/your/dir|g, the freshly
+                # fetched script keeps its placeholder, and the refreshed CLI
+                # falls back to ~/.personaforge. (Third variant of that trap;
+                # pinned by test_self_update_substitutes_the_install_dir.)
+                ph="__PF_HOME""_DEFAULT__"
+                sed "s|$ph|$HOME_DIR|g" "$tmp2" > "$tmp2.done" 2>/dev/null || cp "$tmp2" "$tmp2.done"
+                if ! cmp -s "$tmp2.done" "$self"; then
+                    chmod +x "$tmp2.done" 2>/dev/null || true
+                    if mv "$tmp2.done" "$self" 2>/dev/null; then
+                        echo "▸ Updated the personaforge command itself."
+                    fi
+                fi
+                rm -f "$tmp2" "$tmp2.done" 2>/dev/null || true
+            fi
+        fi
+        run pull && run up -d ;;
     logs)
         shift
         n="$TAIL"
@@ -331,7 +388,7 @@ personaforge — manage your PersonaForge install
   personaforge stop           Stop the stack
   personaforge restart [svc]  Bounce the stack (or one service) in place
   personaforge recreate       Tear down and recreate (after a compose change)
-  personaforge update         Pull latest images and restart
+  personaforge update         Refresh the compose + this command, pull images, restart
   personaforge logs [svc]     Follow logs, last $TAIL lines first
                               (-n 500 / --tail=all for more history)
   personaforge status         Show container status
