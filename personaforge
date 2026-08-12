@@ -1,0 +1,144 @@
+#!/bin/sh
+# ── personaforge — lifecycle wrapper for a release install ───────────────────
+# Thin convenience around `compose -f docker-compose.release.yml` in the
+# install dir (~/.personaforge).
+#
+# This file is the SINGLE SOURCE OF TRUTH for the CLI: the installer embeds it
+# verbatim (scripts/gen_installer.py, marker __EMBEDDED_CLI__). It used to be
+# duplicated as a cut-down heredoc inside install.sh, so commands added here
+# never reached anyone's machine — `restart` sat unshipped for months.
+set -eu
+
+# The installer rewrites the placeholder with the real install dir; running
+# this script straight from a clone falls back to the default location.
+# NB: the guard below must NOT spell the placeholder in full, or the
+# installer's substitution rewrites the detector too and the fallback fires
+# on every install (caught by test_installed_cli_uses_the_install_dir).
+PF_HOME_DEFAULT="__PF_HOME_DEFAULT__"
+case "$PF_HOME_DEFAULT" in *PF_HOME_DEFAULT*) PF_HOME_DEFAULT="$HOME/.personaforge" ;; esac
+HOME_DIR="${PERSONAFORGE_HOME:-$PF_HOME_DEFAULT}"
+
+COMPOSE_FILE="docker-compose.release.yml"
+PORT="${PORT:-3000}"
+# Where `update` refreshes the compose file and this script from. Overridable
+# for forks/testing; unset it (PF_SELF_UPDATE=0) to keep the current files.
+PF_DEPLOY_RAW="${PF_DEPLOY_RAW:-https://raw.githubusercontent.com/tichomir/persona-forge-deploy/main}"
+# How much history `logs` shows before following. `logs -f` alone replays
+# everything since container start, which on a long-running install is a wall
+# of text before the line you actually wanted.
+TAIL="${PERSONAFORGE_LOG_TAIL:-100}"
+
+if command -v docker >/dev/null 2>&1; then
+    docker compose version >/dev/null 2>&1 && COMPOSE="docker compose" || COMPOSE="docker-compose"
+elif command -v podman >/dev/null 2>&1; then
+    COMPOSE="podman-compose"
+else
+    echo "No container runtime found (docker/podman)." >&2; exit 1
+fi
+
+[ -f "$HOME_DIR/$COMPOSE_FILE" ] || { echo "Not installed: $HOME_DIR/$COMPOSE_FILE missing. Run the installer first." >&2; exit 1; }
+
+run() { ( cd "$HOME_DIR" && $COMPOSE -f "$COMPOSE_FILE" "$@" ); }
+
+case "${1:-}" in
+    start|up)     run up -d ;;
+    stop|down)    run down ;;
+    # Bounce the containers in place — seconds, and keeps them. If the stack
+    # isn't up (nothing to restart), fall back to bringing it up.
+    restart)      shift; run restart "$@" || run up -d ;;
+    # Full teardown + recreate. Needed when the compose file itself changed
+    # (new services, new volume mounts) — a plain restart won't pick those up.
+    recreate)     run down && run up -d ;;
+    update)
+        # `update` used to be just `pull && up -d` — new IMAGES against the
+        # compose the installer wrote, possibly months ago. So a release that
+        # added a named volume never applied, and the data that volume existed
+        # to protect was thrown away on every upgrade: orchestrator settings
+        # and standing instructions reset to defaults, every time. Refresh the
+        # topology (and this script) first, then upgrade.
+        if [ "${PF_SELF_UPDATE:-1}" != "0" ]; then
+            fetch() {  # $1 = remote name, $2 = destination
+                if command -v curl >/dev/null 2>&1; then
+                    curl -fsSL "$PF_DEPLOY_RAW/$1" -o "$2" 2>/dev/null
+                elif command -v wget >/dev/null 2>&1; then
+                    wget -qO "$2" "$PF_DEPLOY_RAW/$1" 2>/dev/null
+                else
+                    return 1
+                fi
+            }
+            tmp="$(mktemp)" || tmp=""
+            if [ -n "$tmp" ] && fetch "$COMPOSE_FILE" "$tmp" && [ -s "$tmp" ]; then
+                if ! cmp -s "$tmp" "$HOME_DIR/$COMPOSE_FILE"; then
+                    backup="$HOME_DIR/$COMPOSE_FILE.bak-$(date +%Y%m%d%H%M%S)"
+                    cp "$HOME_DIR/$COMPOSE_FILE" "$backup" 2>/dev/null || true
+                    cp "$tmp" "$HOME_DIR/$COMPOSE_FILE"
+                    echo "▸ Updated the compose file (previous saved as $(basename "$backup"))."
+                fi
+            else
+                echo "▸ Could not fetch the latest compose file — continuing with the current one." >&2
+            fi
+            [ -n "$tmp" ] && rm -f "$tmp"
+
+            # Refresh this script too, so new commands arrive with an update
+            # instead of requiring the installer to be re-run. Written via a
+            # temp file + mv: replacing a running sh script in place is not
+            # safe, but a rename leaves this process on its old inode.
+            self="$0"
+            tmp2="$(mktemp)" || tmp2=""
+            if [ -n "$tmp2" ] && fetch personaforge "$tmp2" && [ -s "$tmp2" ]; then
+                # Assemble the placeholder at runtime. Spelled literally, the
+                # INSTALLER's own global substitution rewrites this line too —
+                # the sed then reads s|/your/dir|/your/dir|g, the freshly
+                # fetched script keeps its placeholder, and the refreshed CLI
+                # falls back to ~/.personaforge. (Third variant of that trap;
+                # pinned by test_self_update_substitutes_the_install_dir.)
+                ph="__PF_HOME""_DEFAULT__"
+                sed "s|$ph|$HOME_DIR|g" "$tmp2" > "$tmp2.done" 2>/dev/null || cp "$tmp2" "$tmp2.done"
+                if ! cmp -s "$tmp2.done" "$self"; then
+                    chmod +x "$tmp2.done" 2>/dev/null || true
+                    if mv "$tmp2.done" "$self" 2>/dev/null; then
+                        echo "▸ Updated the personaforge command itself."
+                    fi
+                fi
+                rm -f "$tmp2" "$tmp2.done" 2>/dev/null || true
+            fi
+        fi
+        run pull && run up -d ;;
+    logs)
+        shift
+        n="$TAIL"
+        # `personaforge logs -n 500 api` / `--tail 500` / `--tail=all`
+        case "${1:-}" in
+            -n|--tail) n="${2:-$TAIL}"; shift 2 ;;
+            --tail=*)  n="${1#--tail=}"; shift ;;
+        esac
+        run logs -f --tail "$n" "$@" ;;
+    status|ps)    run ps ;;
+    open)         ( open "http://localhost:$PORT" 2>/dev/null || xdg-open "http://localhost:$PORT" 2>/dev/null || echo "http://localhost:$PORT" ) ;;
+    uninstall)
+        printf "Stop containers and remove %s? Your data/ is kept. [y/N] " "$HOME_DIR"
+        read -r ans
+        case "$ans" in
+            y|Y) run down; rm -f "$HOME_DIR/$COMPOSE_FILE"; echo "Removed. Data preserved in $HOME_DIR/data." ;;
+            *)   echo "Cancelled." ;;
+        esac ;;
+    ""|help|-h|--help)
+        cat <<EOF
+personaforge — manage your PersonaForge install
+
+  personaforge start          Start the stack (detached)
+  personaforge stop           Stop the stack
+  personaforge restart [svc]  Bounce the stack (or one service) in place
+  personaforge recreate       Tear down and recreate (after a compose change)
+  personaforge update         Refresh the compose + this command, pull images, restart
+  personaforge logs [svc]     Follow logs, last $TAIL lines first
+                              (-n 500 / --tail=all for more history)
+  personaforge status         Show container status
+  personaforge open           Open the GUI in your browser
+  personaforge uninstall      Stop + remove the compose file (keeps data/)
+
+Install dir: $HOME_DIR   (override with PERSONAFORGE_HOME)
+EOF
+        ;;
+    *) echo "Unknown command: $1 (try 'personaforge help')" >&2; exit 1 ;;
+esac
