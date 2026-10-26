@@ -128,6 +128,9 @@ services:
       # container network — host.docker.internal needs a host-gateway mapping
       # that only the dev compose has.
       - PERSONAFORGE_SELF_URL=${PERSONAFORGE_SELF_URL:-http://api:8000}
+      # Chat attachments: per-file char cap + budget across a session's files.
+      - PERSONAFORGE_CHAT_FILE_MAX_CHARS=${PERSONAFORGE_CHAT_FILE_MAX_CHARS:-200000}
+      - PERSONAFORGE_CHAT_FILES_TOTAL_MAX_CHARS=${PERSONAFORGE_CHAT_FILES_TOTAL_MAX_CHARS:-400000}
       - PERSONAFORGE_PERSONAS_DIR=/data/personas
       - PERSONAFORGE_SKILL_DATA_DIR=/data/skill_library
       - PERSONAFORGE_BUILDER_MEMORY_DIR=/data/builder-memory
